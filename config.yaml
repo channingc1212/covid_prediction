@@ -1,0 +1,33 @@
+data:
+  input_path: 'data/raw_weekly_hospital_respiratory_data_2020_2024.csv'
+  date_column: 'Week Ending Date'
+  target_column: 'Number of Inpatient Beds'
+  group_by_column: 'Geographic aggregation'
+  train_test_split: 0.2
+  feature_engineering:
+    enabled: true
+    time_features:
+      enabled: true
+      features: ['year', 'month', 'day_of_week', 'quarter', 'is_weekend']
+    lag_features: [1, 7]
+    rolling_features:
+      windows: [7]
+      operations: ['mean', 'std']
+    missing_value_handling:
+      method: 'interpolate'
+      interpolation_method: 'linear'
+      limit: 7
+      max_gap_to_fill: 7
+
+model:
+  models_to_try: ['random_forest', 'xgboost']
+  random_forest_params:
+    n_estimators: 100
+    max_depth: 10
+  xgboost_params:
+    n_estimators: 100
+    max_depth: 7
+
+output:
+  model_path: 'models/trained_models.joblib'
+  visualization_dir: 'visualizations' 

@@ -2,140 +2,117 @@ from prophet import Prophet
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
-from typing import Dict, Union, List
+from typing import Dict, Tuple, List, Any
 import pandas as pd
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 import logging
-import joblib
-from itertools import product
 
 logger = logging.getLogger(__name__)
 
-class ModelFactory:
-    @staticmethod
-    def create_model(model_type: str, config: dict) -> 'BaseTimeSeriesModel':
-        if model_type == "prophet":
-            return ProphetModel(config)
-        elif model_type == "arima":
-            return ARIMAModel(config)
-        elif model_type == "random_forest":
-            return RandomForestModel(config)
-        elif model_type == "xgboost":
-            return XGBoostModel(config)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
-
-class BaseTimeSeriesModel:
+class BaseModel:
     def __init__(self, config: dict):
         self.config = config
-        self.model = None
         
-    def train(self, train_data: pd.DataFrame) -> None:
+    def train(self, train_data: pd.DataFrame, train_target: pd.Series) -> None:
         raise NotImplementedError
         
-    def predict(self, data: pd.DataFrame) -> np.ndarray:
+    def predict(self, features: pd.DataFrame) -> np.ndarray:
         raise NotImplementedError
         
-    def evaluate(self, test_data: pd.DataFrame, predictions: np.ndarray) -> Dict[str, float]:
-        metrics = {
-            'mae': mean_absolute_error(test_data['y'], predictions),
-            'rmse': np.sqrt(mean_squared_error(test_data['y'], predictions)),
-            'mape': np.mean(np.abs((test_data['y'] - predictions) / test_data['y'])) * 100
+    def evaluate(self, y_true: pd.Series, y_pred: np.ndarray) -> Dict[str, float]:
+        return {
+            'mae': mean_absolute_error(y_true, y_pred),
+            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+            'mape': mean_absolute_percentage_error(y_true, y_pred) * 100
         }
-        return metrics
 
-class ProphetModel(BaseTimeSeriesModel):
-    def train(self, train_data: pd.DataFrame) -> None:
+class ProphetModel(BaseModel):
+    def train(self, train_data: pd.DataFrame, train_target: pd.Series) -> None:
         self.model = Prophet(**self.config['model']['prophet_params'])
-        self.model.fit(train_data[['ds', 'y']])
+        df = pd.DataFrame({'ds': train_data.index, 'y': train_target})
+        self.model.fit(df)
         
-    def predict(self, data: pd.DataFrame) -> np.ndarray:
-        forecast = self.model.predict(data[['ds']])
+    def predict(self, features: pd.DataFrame) -> np.ndarray:
+        future = pd.DataFrame({'ds': features.index})
+        forecast = self.model.predict(future)
         return forecast['yhat'].values
 
-class ARIMAModel(BaseTimeSeriesModel):
-    def train(self, train_data: pd.DataFrame) -> None:
-        best_aic = float('inf')
-        best_params = None
-        
-        # Grid search over ARIMA parameters
-        p = self.config['model']['arima_params']['p']
-        d = self.config['model']['arima_params']['d']
-        q = self.config['model']['arima_params']['q']
-        
-        for order in product(p, d, q):
-            try:
-                model = SARIMAX(train_data['y'], order=order)
-                results = model.fit()
-                if results.aic < best_aic:
-                    best_aic = results.aic
-                    best_params = order
-                    self.model = results
-            except:
-                continue
-                
-    def predict(self, data: pd.DataFrame) -> np.ndarray:
-        return self.model.forecast(len(data))
-
-class RandomForestModel(BaseTimeSeriesModel):
-    def train(self, train_data: pd.DataFrame) -> None:
+class RandomForestModel(BaseModel):
+    def train(self, train_data: pd.DataFrame, train_target: pd.Series) -> None:
         self.model = RandomForestRegressor(**self.config['model']['random_forest_params'])
-        # Use feature columns from feature engineering
-        self.feature_columns = [col for col in train_data.columns 
-                              if col not in ['ds', 'y'] and not pd.isna(train_data[col]).any()]
-        logger.info(f"Using features: {self.feature_columns}")
-        self.model.fit(train_data[self.feature_columns], train_data['y'])
+        self.model.fit(train_data, train_target)
         
-    def predict(self, data: pd.DataFrame) -> np.ndarray:
-        return self.model.predict(data[self.feature_columns])
+    def predict(self, features: pd.DataFrame) -> np.ndarray:
+        return self.model.predict(features)
 
-class XGBoostModel(BaseTimeSeriesModel):
-    def train(self, train_data: pd.DataFrame) -> None:
+class XGBoostModel(BaseModel):
+    def train(self, train_data: pd.DataFrame, train_target: pd.Series) -> None:
         self.model = xgb.XGBRegressor(**self.config['model']['xgboost_params'])
-        features = [col for col in train_data.columns if col not in ['ds', 'y']]
-        self.model.fit(train_data[features], train_data['y'])
-        self.feature_columns = features
+        self.model.fit(train_data, train_target)
         
-    def predict(self, data: pd.DataFrame) -> np.ndarray:
-        return self.model.predict(data[self.feature_columns])
+    def predict(self, features: pd.DataFrame) -> np.ndarray:
+        return self.model.predict(features)
 
 class ModelSelector:
-    def __init__(self, config: dict):
+    def __init__(self, config):
         self.config = config
         
-    def select_best_model(self, train_data: pd.DataFrame, test_data: pd.DataFrame) -> tuple:
-        results = []
+    def _create_model(self, model_name):
+        """Create a model instance based on the model name."""
+        if model_name == 'random_forest':
+            return RandomForestRegressor(
+                n_estimators=self.config['model']['random_forest_params']['n_estimators'],
+                max_depth=self.config['model']['random_forest_params']['max_depth'],
+                random_state=42
+            )
+        elif model_name == 'xgboost':
+            return xgb.XGBRegressor(
+                n_estimators=self.config['model']['xgboost_params']['n_estimators'],
+                max_depth=self.config['model']['xgboost_params']['max_depth'],
+                random_state=42
+            )
+        else:
+            raise ValueError(f"Unknown model type: {model_name}")
+
+    def select_best_model(self, train_features, train_target, test_features, test_target, feature_names):
+        """Train and evaluate multiple models, select the best one."""
+        best_metrics = None
+        best_model = None
+        best_model_name = None
         
-        for model_type in self.config['model']['models_to_try']:
-            logger.info(f"Training {model_type} model...")
-            model = ModelFactory.create_model(model_type, self.config)
-            
+        for model_name in self.config['model']['models_to_try']:
             try:
-                model.train(train_data)
-                predictions = model.predict(test_data)
-                metrics = model.evaluate(test_data, predictions)
+                model = self._create_model(model_name)
+                model.fit(train_features, train_target)
                 
-                results.append({
-                    'model_type': model_type,
-                    'model': model,
-                    'metrics': metrics
-                })
+                # Make predictions
+                predictions = model.predict(test_features)
                 
-                logger.info(f"{model_type} metrics: {metrics}")
+                # Calculate metrics
+                metrics = {
+                    'mae': mean_absolute_error(test_target, predictions),
+                    'rmse': np.sqrt(mean_squared_error(test_target, predictions)),
+                    'mape': mean_absolute_percentage_error(test_target, predictions) * 100
+                }
                 
+                logger.info(f"{model_name} metrics: {metrics}")
+                
+                # Update best model if this one is better (using RMSE as criterion)
+                if best_metrics is None or metrics['rmse'] < best_metrics['rmse']:
+                    best_metrics = metrics
+                    best_model = model
+                    best_model_name = model_name
+                    
             except Exception as e:
-                logger.error(f"Error training {model_type}: {str(e)}")
+                logger.error(f"Error training {model_name}: {str(e)}")
                 continue
         
-        # Select best model based on RMSE
-        best_result = min(results, key=lambda x: x['metrics']['rmse'])
-        
-        # Save comparison results
-        comparison_df = pd.DataFrame([
-            {**{'model': r['model_type']}, **r['metrics']}
-            for r in results
-        ])
-        comparison_df.to_csv(self.config['output']['model_comparison_path'], index=False)
-        
-        return best_result['model'], best_result['metrics'] 
+        if best_model is None:
+            raise ValueError("No models were successfully trained")
+            
+        return {
+            'model': best_model,
+            'name': best_model_name,
+            'metrics': best_metrics
+        } 

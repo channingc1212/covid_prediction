@@ -1,51 +1,99 @@
-import yaml
-from .data_preprocessing import DataPreprocessor
-from .feature_engineering import FeatureEngineer
-from .model import ModelSelector
 import logging
+from typing import Dict
 import pandas as pd
+from sklearn.model_selection import train_test_split
 import joblib
+from pathlib import Path
+import numpy as np
 
-logging.basicConfig(level=logging.INFO)
+from src.preprocessing import DataProcessor
+from src.model import ModelSelector
+from src.visualization import ModelVisualizer
+from src.utils import load_config
+
 logger = logging.getLogger(__name__)
 
 def train_model():
-    try:
-        # Step 1: Load Configuration
-        with open('config/config.yaml', 'r') as f:
-            config = yaml.safe_load(f)
-        
-        # Step 2: Data Preprocessing
-        preprocessor = DataPreprocessor(config)
-        raw_data = preprocessor.load_data()
-        train_data, test_data = preprocessor.prepare_data(raw_data)
-        
-        # Step 3: Feature Engineering
-        feature_engineer = FeatureEngineer(config)
-        train_data = feature_engineer.create_all_features(train_data)
-        test_data = feature_engineer.create_all_features(test_data)
-        
-        # Step 4: Model Selection and Training
-        model_selector = ModelSelector(config)
-        best_model, metrics = model_selector.select_best_model(train_data, test_data)
-        
-        # Step 5: Save the Model
-        joblib.dump(best_model, config['output']['model_path'])
-        logger.info(f"Best model saved to {config['output']['model_path']}")
-        
-        # Step 6: Generate and Save Predictions
-        final_predictions = best_model.predict(test_data)
-        pd.DataFrame({
-            'ds': test_data['ds'],
-            'actual': test_data['y'],
-            'predicted': final_predictions
-        }).to_csv(config['output']['predictions_path'], index=False)
-        
-        return metrics
-        
-    except Exception as e:
-        logger.error(f"Error in training pipeline: {str(e)}")
-        raise
+    """Train models for each region."""
+    config = load_config()
+    preprocessor = DataProcessor(config)
+    visualizer = ModelVisualizer(config)
+    trained_models = {}
+    metrics_by_region = {}
+    
+    # Load data
+    data = pd.read_csv(config['data']['input_path'])
+    
+    # Preprocess data
+    data_by_region = preprocessor.prepare_data(data)
+    
+    for region, region_data in data_by_region.items():
+        try:
+            # Unpack the tuple values
+            features, target = region_data
+            
+            # Convert datetime to numeric (timestamp)
+            if 'Week Ending Date' in features.columns:
+                features['Week Ending Date'] = pd.to_datetime(features['Week Ending Date']).astype(np.int64) // 10**9
+            
+            # Convert categorical columns to numeric
+            categorical_columns = features.select_dtypes(include=['object']).columns
+            for col in categorical_columns:
+                features[col] = pd.Categorical(features[col]).codes
+            
+            # Split into train/test sets
+            train_features, test_features, train_target, test_target = train_test_split(
+                features, target, test_size=0.2, random_state=42
+            )
+            
+            # Get feature names
+            feature_names = features.columns.tolist()
+            
+            # Check if we have enough data
+            if len(train_features) < 10:
+                logger.warning(f"Skipping region {region} due to insufficient data")
+                continue
+                
+            # Train model selector
+            model_selector = ModelSelector(config)
+            result = model_selector.select_best_model(
+                train_features,
+                train_target,
+                test_features,
+                test_target,
+                feature_names
+            )
+            
+            # Store the trained model and metrics
+            trained_models[region] = result
+            metrics_by_region[region] = result['metrics']
+            
+            # Create actual vs predicted visualization
+            y_pred = result['model'].predict(test_features)
+            visualizer.plot_actual_vs_predicted(
+                region,
+                test_target,
+                y_pred,
+                test_features.index
+            )
+            
+        except Exception as e:
+            logger.error(f"Error training models for region {region}: {str(e)}")
+            continue
+    
+    if not trained_models:
+        raise ValueError("No models were successfully trained for any region")
+    
+    # Create performance summary visualization
+    visualizer.create_performance_summary(metrics_by_region)
+    
+    # Save trained models and metrics
+    save_path = Path(config['output']['model_path'])
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(trained_models, save_path)
+    logger.info(f"Models and metrics saved to {save_path}")
+    
+    return trained_models
 
 if __name__ == "__main__":
     train_model() 

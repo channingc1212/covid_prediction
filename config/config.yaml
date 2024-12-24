@@ -1,63 +1,56 @@
+# Data Configuration
 data:
   input_path: "data/raw_weekly_hospital_respiratory_data_2020_2024.csv"
   date_column: "Week Ending Date"
   target_column: "Number of Inpatient Beds"
+  group_by_column: "Geographic aggregation"
   train_test_split: 0.2
-  missing_value_handling:
-    method: "interpolate"  # Options: "interpolate", "forward_fill", "backward_fill", "mean"
-    interpolation_method: "time"  # Options: "linear", "time", "cubic", "polynomial"
-    max_gap_to_fill: 12  # Maximum number of consecutive missing values to fill
+  
+  # Feature Engineering Settings
   feature_engineering:
-    enabled: true  # Set to false to use only raw features
+    enabled: true
     time_features:
       enabled: true
       features:
         - "year"
         - "month"
         - "day_of_week"
-        - "day_of_year"
         - "quarter"
         - "is_weekend"
-    lag_features: [1, 7, 30]  # Previous week, month, quarter
-    rolling_features: 
-      windows: [7, 30]  # Weekly and monthly windows
+    lag_features: [1, 7, 30]
+    rolling_features:
+      windows: [7, 30]
       operations: ["mean", "std", "min", "max"]
-    custom_features: []  # Add any custom feature column names here
+    missing_value_handling:
+      method: "interpolate"
+      interpolation_method: "linear"
+      max_gap_to_fill: 7
 
+# Model Configuration
 model:
   models_to_try:
-    - "prophet"
-    - "arima"
     - "random_forest"
     - "xgboost"
-  forecast_periods: 30
-  cv_folds: 5
-  metrics:
-    - "mae"
-    - "rmse"
-    - "mape"
   
-  # Model specific parameters
-  prophet_params:
-    yearly_seasonality: true
-    weekly_seasonality: true
-    daily_seasonality: true
-    
-  arima_params:
-    p: [0, 1, 2]  # AR order
-    d: [0, 1]     # Difference order
-    q: [0, 1, 2]  # MA order
-    
   random_forest_params:
     n_estimators: 100
     max_depth: 10
+    random_state: 42
     
   xgboost_params:
     n_estimators: 100
     max_depth: 7
     learning_rate: 0.1
+    random_state: 42
 
+# Output Configuration
 output:
-  model_path: "models/best_model.pkl"
-  predictions_path: "data/predictions.csv"
-  model_comparison_path: "results/model_comparison.csv" 
+  model_path: "models/trained_models.pkl"
+  visualization_dir: "results/visualizations"
+  model_comparison_path: "results/model_comparison.csv"
+
+# Visualization Settings
+visualization:
+  plot_style: "seaborn"
+  figure_size: [12, 6]
+  save_format: "png" 
