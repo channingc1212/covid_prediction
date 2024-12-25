@@ -105,22 +105,14 @@ class DataProcessor:
         return df
 
     def _handle_missing_values(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Handle missing values in features"""
+        """Handle missing values in features and target"""
         df = df.copy()
         
-        for column in df.columns:
-            if df[column].isna().any():
-                method = self.config['data']['feature_engineering']['missing_value_handling']['method']
-                max_gap = self.config['data']['feature_engineering']['missing_value_handling']['max_gap_to_fill']
-                
-                if method == "interpolate":
-                    interp_method = self.config['data']['feature_engineering']['missing_value_handling']['interpolation_method']
-                    df[column] = df[column].interpolate(method=interp_method, limit=max_gap)
-                elif method == "forward_fill":
-                    df[column] = df[column].fillna(method='ffill', limit=max_gap)
-                elif method == "backward_fill":
-                    df[column] = df[column].fillna(method='bfill', limit=max_gap)
-                
+        # First forward fill
+        df = df.fillna(method='ffill')
+        # Then backward fill any remaining NaNs
+        df = df.fillna(method='bfill')
+        
         return df
 
     # ... [rest of the feature engineering methods] 

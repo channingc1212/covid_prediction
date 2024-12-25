@@ -76,7 +76,7 @@ class ModelSelector:
             raise ValueError(f"Unknown model type: {model_name}")
 
     def select_best_model(self, train_features, train_target, test_features, test_target, feature_names):
-        """Train and evaluate multiple models, select the best one."""
+        """Train and evaluate multiple models, select the best one based on MAPE."""
         best_metrics = None
         best_model = None
         best_model_name = None
@@ -91,15 +91,15 @@ class ModelSelector:
                 
                 # Calculate metrics
                 metrics = {
+                    'mape': mean_absolute_percentage_error(test_target, predictions) * 100,
                     'mae': mean_absolute_error(test_target, predictions),
-                    'rmse': np.sqrt(mean_squared_error(test_target, predictions)),
-                    'mape': mean_absolute_percentage_error(test_target, predictions) * 100
+                    'rmse': np.sqrt(mean_squared_error(test_target, predictions))
                 }
                 
                 logger.info(f"{model_name} metrics: {metrics}")
                 
-                # Update best model if this one is better (using RMSE as criterion)
-                if best_metrics is None or metrics['rmse'] < best_metrics['rmse']:
+                # Update best model if this one is better (using MAPE as criterion)
+                if best_metrics is None or metrics['mape'] < best_metrics['mape']:
                     best_metrics = metrics
                     best_model = model
                     best_model_name = model_name

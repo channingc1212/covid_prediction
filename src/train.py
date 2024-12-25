@@ -49,11 +49,6 @@ def train_model():
             # Get feature names
             feature_names = features.columns.tolist()
             
-            # Check if we have enough data
-            if len(train_features) < 10:
-                logger.warning(f"Skipping region {region} due to insufficient data")
-                continue
-                
             # Train model selector
             model_selector = ModelSelector(config)
             result = model_selector.select_best_model(
@@ -74,7 +69,8 @@ def train_model():
                 region,
                 test_target,
                 y_pred,
-                test_features.index
+                test_features.index,
+                test_features['Week Ending Date'] if 'Week Ending Date' in test_features.columns else None
             )
             
         except Exception as e:
@@ -84,14 +80,22 @@ def train_model():
     if not trained_models:
         raise ValueError("No models were successfully trained for any region")
     
+    # Save metrics to CSV
+    metrics_df = pd.DataFrame.from_dict(metrics_by_region, orient='index')
+    metrics_df.index.name = 'region'
+    metrics_path = Path(config['output']['model_comparison_path'])
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_df.to_csv(metrics_path)
+    logger.info(f"Model metrics saved to {metrics_path}")
+    
     # Create performance summary visualization
     visualizer.create_performance_summary(metrics_by_region)
     
-    # Save trained models and metrics
+    # Save trained models
     save_path = Path(config['output']['model_path'])
     save_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(trained_models, save_path)
-    logger.info(f"Models and metrics saved to {save_path}")
+    logger.info(f"Models saved to {save_path}")
     
     return trained_models
 
