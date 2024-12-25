@@ -22,19 +22,39 @@ class DataProcessor:
             
             data[date_col] = pd.to_datetime(data[date_col])
             
+            # Handle extreme values in target column
+            data = self._handle_extreme_values(data, target_col)
+            
             # Group by geographic aggregation
             grouped_data = {}
             for group_name, group_df in data.groupby(group_col):
-                features = self._create_features(group_df)
-                target = group_df[target_col]
+                try:
+                    # Create features
+                    features = self._create_features(group_df)
+                    target = group_df[target_col]
+                    
+                    # Handle missing and infinite values
+                    features, target = self._clean_data(features, target)
+                    
+                    if len(features) < 10:  # Minimum required data points
+                        logger.warning(f"Insufficient data points for {group_name} after cleaning. Skipping.")
+                        continue
+                        
+                    # Add diagnostic information
+                    logger.info(f"Group {group_name}:")
+                    logger.info(f"  - Total rows: {len(group_df)}")
+                    logger.info(f"  - Missing values in target: {target.isna().sum()}")
+                    logger.info(f"  - Missing values in features: {features.isna().sum().sum()}")
+                    logger.info(f"  - Final shape after cleaning: {features.shape}")
+                    
+                    grouped_data[group_name] = (features, target)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing group {group_name}: {str(e)}")
+                    continue
                 
-                # Add diagnostic information
-                logger.info(f"Group {group_name}:")
-                logger.info(f"  - Total rows: {len(group_df)}")
-                logger.info(f"  - Missing values in target: {target.isna().sum()}")
-                logger.info(f"  - Missing values in features: {features.isna().sum().sum()}")
-                
-                grouped_data[group_name] = (features, target)
+            if not grouped_data:
+                raise ValueError("No valid groups after data cleaning")
                 
             logger.info(f"Prepared data for {len(grouped_data)} groups")
             return grouped_data
@@ -42,6 +62,45 @@ class DataProcessor:
         except Exception as e:
             logger.error(f"Error preparing data: {str(e)}")
             raise
+
+    def _handle_extreme_values(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
+        """Handle extreme values using statistical methods"""
+        df = df.copy()
+        
+        # Calculate statistics for the column
+        Q1 = df[column].quantile(0.25)
+        Q3 = df[column].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 3 * IQR
+        upper_bound = Q3 + 3 * IQR
+        
+        # Log extreme values
+        extreme_mask = (df[column] < lower_bound) | (df[column] > upper_bound)
+        if extreme_mask.any():
+            logger.warning(f"Found {extreme_mask.sum()} extreme values in {column}")
+            logger.info(f"Range: [{lower_bound:.2f}, {upper_bound:.2f}]")
+        
+        # Cap extreme values
+        df.loc[df[column] < lower_bound, column] = lower_bound
+        df.loc[df[column] > upper_bound, column] = upper_bound
+        
+        return df
+
+    def _clean_data(self, features: pd.DataFrame, target: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
+        """Clean features and target data"""
+        # Get common valid indices
+        valid_features = ~(features.isna().any(axis=1) | features.isin([np.inf, -np.inf]).any(axis=1))
+        valid_target = ~(target.isna() | target.isin([np.inf, -np.inf]))
+        valid_indices = valid_features & valid_target
+        
+        if not valid_indices.any():
+            raise ValueError("No valid data points after cleaning")
+        
+        # Filter both features and target
+        features = features[valid_indices].copy()
+        target = target[valid_indices].copy()
+        
+        return features, target
 
     def _create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create all features for modeling"""
@@ -112,6 +171,10 @@ class DataProcessor:
         df = df.fillna(method='ffill')
         # Then backward fill any remaining NaNs
         df = df.fillna(method='bfill')
+        
+        # If any NaNs remain, fill with column mean
+        if df.isna().any().any():
+            df = df.fillna(df.mean())
         
         return df
 

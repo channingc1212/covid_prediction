@@ -45,12 +45,12 @@ model:
 
 # Output Configuration
 output:
-  model_path: "models/trained_models.pkl"
-  visualization_dir: "results/visualizations"
+  model_path: "models/trained_models.joblib"
+  visualization_dir: "visualizations"
   model_comparison_path: "results/model_comparison.csv"
 
 # Visualization Settings
-visualization:
-  plot_style: "seaborn"
+visualizations:
+  plot_style: "seaborn-v0_8"
   figure_size: [12, 6]
   save_format: "png" 

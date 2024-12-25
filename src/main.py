@@ -14,7 +14,9 @@ def setup_directories():
     """Create necessary directories if they don't exist"""
     directories = [
         'models',
+        'results',
         'results/visualizations',
+        'visualizations',
     ]
     for directory in directories:
         Path(directory).mkdir(parents=True, exist_ok=True)
@@ -31,6 +33,10 @@ def main():
         logger.info("Training completed successfully!")
         return models
         
+    except KeyError as e:
+        logger.error(f"Configuration error: Missing key {str(e)}")
+        logger.info("Please check your config.yaml file for missing configurations")
+        raise
     except Exception as e:
         logger.error(f"Error in main pipeline: {str(e)}")
         raise

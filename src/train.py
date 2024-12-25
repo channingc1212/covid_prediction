@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 def train_model():
     """Train models for each region."""
     config = load_config()
+    print("Full Config Loaded:", config)  # Debug print
     preprocessor = DataProcessor(config)
     visualizer = ModelVisualizer(config)
     trained_models = {}
@@ -64,14 +65,31 @@ def train_model():
             metrics_by_region[region] = result['metrics']
             
             # Create actual vs predicted visualization
-            y_pred = result['model'].predict(test_features)
-            visualizer.plot_actual_vs_predicted(
-                region,
-                test_target,
-                y_pred,
-                test_features.index,
-                test_features['Week Ending Date'] if 'Week Ending Date' in test_features.columns else None
-            )
+            try:
+                y_pred = result['model'].predict(test_features)
+                logger.info(f"Creating visualization for {region}")
+                logger.info(f"Test features shape: {test_features.shape}")
+                logger.info(f"Prediction shape: {y_pred.shape}")
+                logger.info(f"Test target shape: {test_target.shape}")
+                
+                # Ensure date column exists
+                date_col = config['data']['date_column']
+                if date_col in test_features.columns:
+                    timestamps = test_features[date_col]
+                else:
+                    timestamps = None
+                    logger.warning(f"Date column {date_col} not found in features")
+                
+                visualizer.plot_actual_vs_predicted(
+                    region,
+                    test_target,
+                    y_pred,
+                    test_features.index,
+                    timestamps
+                )
+            except Exception as e:
+                logger.error(f"Error creating visualization for {region}: {str(e)}")
+                continue
             
         except Exception as e:
             logger.error(f"Error training models for region {region}: {str(e)}")
@@ -80,13 +98,22 @@ def train_model():
     if not trained_models:
         raise ValueError("No models were successfully trained for any region")
     
-    # Save metrics to CSV
-    metrics_df = pd.DataFrame.from_dict(metrics_by_region, orient='index')
-    metrics_df.index.name = 'region'
-    metrics_path = Path(config['output']['model_comparison_path'])
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_df.to_csv(metrics_path)
-    logger.info(f"Model metrics saved to {metrics_path}")
+    # Save metrics to CSV if path is configured
+    if config.get('output', {}).get('model_comparison_path'):
+        metrics_df = pd.DataFrame.from_dict(metrics_by_region, orient='index')
+        metrics_df.index.name = 'region'
+        metrics_path = Path(config['output']['model_comparison_path'])
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_df.to_csv(metrics_path)
+        logger.info(f"Model metrics saved to {metrics_path}")
+    else:
+        # Save metrics in the visualization directory as a fallback
+        metrics_df = pd.DataFrame.from_dict(metrics_by_region, orient='index')
+        metrics_df.index.name = 'region'
+        metrics_path = Path(config['output']['visualization_dir']) / 'model_metrics.csv'
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_df.to_csv(metrics_path)
+        logger.info(f"Model metrics saved to fallback location: {metrics_path}")
     
     # Create performance summary visualization
     visualizer.create_performance_summary(metrics_by_region)
